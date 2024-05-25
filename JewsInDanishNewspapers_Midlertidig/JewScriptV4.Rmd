@@ -1,0 +1,394 @@
+---
+title: "Jews In Danish Newspapers"
+author: "Emil Damm Als"
+date: "2024-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+
+# For text mining:
+library(tidytext)
+library(textdata) 
+library(ggwordcloud)
+library(dbplyr)
+
+```
+
+##loading data 
+
+
+```{r}
+jews <- read_csv("https://labs.statsbiblioteket.dk/labsapi/api/aviser/export/fields?query=%28j%C3%B8d%2A%20OR%20semit%2A%29%20AND%20py%3A%5B1800%20TO%201883%5D&fields=link&fields=recordID&fields=timestamp&fields=pwa&fields=fulltext_org&fields=familyId&fields=lplace&max=-1&structure=header&structure=content&format=CSV")
+```
+## calculating the mean predicted word acuracy, pwa 
+```{r unnesting}
+mean(jews$pwa)
+```
+
+### calculating the mean pwa from 1810 to 1825
+```{r unnesting}
+mean_p <- subset(jews, jews$timestamp > "1810-01-01" & jews$timestamp < "1825-01-01") 
+mean(mean_p$pwa) 
+```
+
+##Sentiment analysis
+###Tidying 
+Breaking the text into individual words by unnesting: 
+```{r unnesting}
+jews %>%
+  unnest_tokens(word, fulltext_org) -> jews_tidy
+```
+
+###stopwords
+I load a stopword list created by Max Odsbjerg, that we used in this course
+```{r loading stopwordlist}
+stopord_1800 <- read_csv("https://gist.githubusercontent.com/maxodsbjerg/1537cf14c3d46b3d30caa5d99f8758e9/raw/9f044a38505334f035be111c9a3f654a24418f6d/stopord_18_clean.csv") 
+```
+For some reason, some months are given a sentiment value that is not zero, some are positive, some negative, therefore I exclude all the months. See under "investigating the sentiment of words and sentences" 
+
+```{r creating extra stopwordlist}
+stopord_ekstra <- tibble(word=c("januar","februar","marts", "april", "maj", "juni", "juli", "august", "september", "november","december")) 
+```
+
+Using "anti_join" before "count" we can sort out the the stop words: 
+```{r sorting out the stopwords}
+jews_tidy %>% 
+  anti_join(stopord_1800) %>%
+  anti_join(stopord_ekstra) %>%
+  group_by(familyId, link, timestamp) %>% 
+  count(word, sort = TRUE) -> jews_tidy_stop
+
+```
+###sentiment
+Im loading Sentida created by bachelor students from cognetive science at Aarhus University: Lars Kjartan Bacher Svendsen, Jacob Aarup Dalsgaard and Gustav Aarup Lauridsen 
+```{r loading Sentida}
+if(!require("devtools")) install.packages("devtools")
+
+devtools::install_github("Guscode/Sentida")
+
+library(Sentida)
+
+```
+
+## Applying sentiment values to the individual words by using lapply 
+```{r using Sentida with lapply}
+jews_tidy_stop
+sentida(jews_tidy_stop$word, output="mean")
+jews_tidy_stop$sentiment <- lapply(jews_tidy_stop$word,sentida,output="total")  
+```
+
+
+```{r unlisting sentiment}
+unlist(jews_tidy_stop$sentiment)
+jews_senti <- jews_tidy_stop %>% 
+  mutate(senti = unlist(sentiment)) %>% 
+  select(-sentiment) 
+
+```
+
+##plotting sentiment over time
+```{r plotting sentiment over time}
+jews_senti_plot <- jews_senti %>%
+  ggplot(aes(x=timestamp, y=senti))
+jews_senti_plot +
+  labs(title = "Sentiment from 1800 to 1883",
+       x = "Year",
+       y = "Sentiment") + 
+  geom_smooth()
+
+```
+
+### Omitting zero-value words and plotting the same thing
+```{r plotting sentiment over time}
+jews_senti_plot <- subset(jews_senti, jews_senti$senti != 0) %>%
+  ggplot(aes(x=timestamp, y=senti))
+jews_senti_plot +
+  labs(title = "Sentiment from 1800 to 1883 with zero-values omitted",
+       x = "Year",
+       y = "Sentiment") + 
+  geom_smooth()
+
+```
+
+## Plotting sentiment from 1810 to 1825
+```{r}
+ jews_s_p_n <- subset(jews_senti, jews_senti$timestamp > "1810-01-01" & jews_senti$timestamp < "1825-01-01") %>%
+  ggplot(aes(x=timestamp, y=senti))
+jews_s_p_n +
+    #scale_y_continuous(limits = c(0,0.3))  +
+    labs(title = "Sentiment from 1810 to 1825",
+       x = "Year",
+       y = "Sentiment") +
+    geom_smooth()
+```
+
+### excluding zero-value words in the same plot
+```{r}
+ jews_s_p_n <- subset(jews_senti, jews_senti$senti != 0 & jews_senti$timestamp > "1810-01-01" & jews_senti$timestamp < "1825-01-01") %>%
+  ggplot(aes(x=timestamp, y=senti))
+jews_s_p_n +
+    labs(title = "Sentiment from 1815 to 1825 with zero-values omitted",
+       x = "Year",
+       y = "Sentiment") +
+  geom_smooth()
+```
+
+## averaging sentiment pr. article
+```{r}
+jews_s_a <- jews_senti %>%
+  group_by(link, timestamp, familyId) %>%
+  summarise(sentiment_avg=mean(senti)) %>%
+  arrange(desc(sentiment_avg))
+
+```
+
+
+### Plotting the average sentiment pr. article over time
+```{r }
+jews_senti_plot <- jews_s_a %>%
+  ggplot(aes(x=timestamp, y=sentiment_avg))
+jews_senti_plot +
+   labs(title = "average sentiment pr. article over time",
+       x = "Year",
+       y = "average sentiment")+
+   geom_smooth()
+
+```
+### with points or dots 
+```{r }
+jews_senti_plot <- jews_s_a %>%
+  ggplot(aes(x=timestamp, y=sentiment_avg))
+jews_senti_plot +
+   labs(title = "average sentiment pr. article over time",
+       x = "Year",
+       y = "average sentiment")+
+   geom_point() +
+   geom_smooth()
+
+```
+
+### average sentiment pr. artice from 1810 to 1825
+```{r}
+jews_senti_plot <- subset(jews_s_a, jews_s_a$timestamp>"1810-01-01"&jews_s_a$timestamp<"1825-01-01") %>%
+  ggplot(aes(x=timestamp, y=sentiment_avg)) 
+jews_senti_plot +
+   labs(title = "Average sentiment pr. article from 1810 to 1825",
+       x = "Year",
+       y = "Average sentiment") +
+   geom_smooth()
+
+```
+### with points or dots 
+```{r}
+jews_senti_plot <- subset(jews_s_a, jews_s_a$timestamp>"1810-01-01"&jews_s_a$timestamp<"1825-01-01") %>%
+  ggplot(aes(x=timestamp, y=sentiment_avg)) 
+jews_senti_plot +
+   labs(title = "Average sentiment pr. article from 1810 to 1825",
+       x = "Year",
+       y = "Average sentiment") +
+   geom_point() +
+   geom_smooth()
+
+```
+
+### loop from 1810 to 1825, plotting the newspapers that has any data in the given period
+```{r}
+
+for(a in names(table(jews_s_a$familyId)) ){
+
+    i=jews_s_a$familyId==a & jews_s_a$timestamp>"1810-01-01"&jews_s_a$timestamp<"1825-01-01"
+    
+  if( !all( i == FALSE ) ){ 
+    subdat <- subset(jews_s_a,subset=i)
+    jews_senti_plot <- subdat %>% ggplot(aes(x=timestamp, y=sentiment_avg)) + 
+    scale_y_continuous(limits = c( min(jews_s_a$sentiment_avg), max(jews_s_a$sentiment_avg)))
+    jews_senti_plot <- jews_senti_plot +
+       geom_smooth() +
+       geom_point() +
+       labs(title = a, 
+             x = "Year", 
+             y = "Average sentiment")
+  
+    
+    
+    
+    print(jews_senti_plot)
+  }
+}
+
+
+min(jews_s_a$timestamp)
+
+```
+
+## Average sentiment pr. article without zero-values - doing the same thing as before, but sorting out all words with a sentiment that equals zero before averaging pr. article 
+```{r}
+jews_s_a_n <- subset(jews_senti, jews_senti$senti !=0) %>% 
+  group_by(link, timestamp, familyId) %>%
+  summarise(sentiment_avg=mean(senti)) %>%
+  arrange(desc(sentiment_avg)) 
+```
+### for the whole period
+```{r}
+jews_senti_plot <- jews_s_a_n %>%
+  ggplot(aes(x=timestamp, y=sentiment_avg))
+jews_senti_plot +
+  labs(title = "Average sentiment pr. article without zero-values over time",
+       x = "Year",
+       y = "Average sentiment") +
+    geom_smooth()
+
+```
+### from 1810 to 1825
+```{r}
+jews_senti_plot <- subset(jews_s_a_n, jews_s_a_n$timestamp>"1810-01-01" & jews_s_a_n$timestamp<"1825-01-01") %>%
+  ggplot(aes(x=timestamp, y=sentiment_avg)) 
+jews_senti_plot +
+  labs(title = "Average sentiment pr. article withput zero-values from 1810 to 1825",
+       x = "Year",
+       y = "Average sentiment") +
+    geom_point() + geom_smooth() 
+
+```
+
+### Using the same loop as earlier - now with averages without zero-sentiment-value-words 
+```{r}
+
+for(a in names(table(jews_s_a_n$familyId)) ){
+  
+  if( !all( c(jews_s_a_n$familyId==a & jews_s_a_n$timestamp>"1810-01-01"&jews_s_a_n$timestamp<"1825-01-01") == FALSE ) ){
+    
+    subdat <- subset(jews_s_a_n,subset=jews_s_a_n$familyId==a & jews_s_a_n$timestamp>"1810-01-01"&jews_s_a_n$timestamp<"1825-01-01")
+    jews_senti_plot <- subdat %>% ggplot(aes(x=timestamp, y=sentiment_avg)) + scale_y_continuous(limits = c( min(jews_s_a$sentiment_avg), max(jews_s_a$sentiment_avg)))
+    jews_senti_plot <- jews_senti_plot  + 
+      geom_point() + 
+      geom_smooth() + 
+      labs(title = a, 
+           x= "Year", 
+           y="Average sentiment without zero-value-words")
+    print(jews_senti_plot)
+  }
+}
+
+
+```
+
+## Investigating the words
+### Which negative words appears most?  
+```{r}
+top_n_words <- subset(jews_senti, jews_senti$senti<0)  %>% 
+  head(150)
+
+```
+
+```{r wordcloud-pro}
+ggplot(data = top_n_words, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = n)) +
+  scale_size_area(max_size = 12) +
+  scale_color_gradientn(colors = c("darkgreen","blue","red")) +
+  theme_minimal()
+```
+
+### Which positive words appear most? 
+```{r}
+top_p_words <- subset(jews_senti, jews_senti$senti>0)  %>% 
+  head(150)
+
+```
+
+```{r wordcloud-pro}
+ggplot(data = top_p_words, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = n)) +
+  scale_size_area(max_size = 12) +
+  scale_color_gradientn(colors = c("darkgreen","blue","red")) +
+  theme_minimal()
+```
+
+
+## invesigating the sentiment of words and sentences 
+### some of the months 
+```{r}
+sentida("maj", output="total")
+sentida("juni", output="total")
+sentida("august", output="total")
+sentida("oktober", output="total")
+```
+### some words with remarkable values 
+```{r}
+sentida("jøde", output="total")
+sentida("muslim", output="total")
+sentida("fælles", output="total")
+sentida("far", output = "total")
+sentida("mor", output="total")
+sentida("Min far og jeg har meget til fælles", output="mean")
+```
+
+### Some sentences found by close-reading articles from 1819
+```{r}
+sentida("I trimpherende Skarer ville de brage frem, endnu engang tage Spanien i Besiddelse, og bestræbe sig en høi Rang blandt Jordens folkefærd", output="mean")
+sentida("I Landet taales de slet ikke og de Krænkelser, de ere udsatte for I Frankfurt, ere større, end man kunne forvente af et Oplyst publicum i den Stad", output="mean")
+```
+## Closereading 
+Loading the table I made while close-reading
+```{r}
+close <- read_csv2(("Data/closereading1819.csv"),
+                   na = "NA")
+```
+### How many percent of the hits were about Jews in 1819?
+```{r}
+sum(close$correct_ocr)/47
+```
+```{r}
+place_count <- close %>%
+  group_by(place_of_interest) %>%
+  summarize(frequency = n()) %>%
+  
+  arrange(desc(frequency))
+```
+
+```{r}
+ggplot(place_count, aes(x = reorder(place_of_interest, -frequency), y = frequency)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Geographical Frequency", x = "Place", y = "Frequency") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+## Sample control 
+Loading the table I made for sample control
+```{r}
+samplecontrol <- read_csv2( "data/samplecontrol.csv")
+```
+
+### How many percent of the hits were about Jews in the samplecontrol?
+```{r}
+sum(samplecontrol$correct_ocr)/150
+```
+
+## Checking the sentiment of 5000 most relevant articles from 1800 TO 1883 NOT WORKING
+```{r}
+cent<- read_csv("https://labs.statsbiblioteket.dk/labsapi/api/aviser/export/fields?query=py%3A%5B1800%20TO%201883%5D&fields=timestamp&fields=pwa&fields=fulltext_org&max=5000&structure=header&structure=content&format=CSV")
+```
+
+```{r unnesting}
+cent %>%
+  unnest_tokens(word, fulltext_org) -> cent_tidy
+```
+
+```{r sorting out the stopwords}
+cent_tidy %>% 
+  anti_join(stopord_1800) %>%
+  anti_join(stopord_ekstra) %>%
+  count(word, sort = TRUE) -> cent_tidy_stop
+
+cent_tidy_stop %>%
+  filter(!is.na(word))
+```
+
+```{r using Sentida with lapply}
+cent_tidy_stop
+sentida(cent_tidy_stop$word, output="mean")
+cent_tidy_stop$sentiment <- lapply(cent_tidy_stop$word,sentida,output="total")
+```
