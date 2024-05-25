@@ -1,0 +1,42 @@
+---
+title: "Visualising danish kings"
+author: "Emil Damm Als"
+date: "2024-05-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Loading data, omitting missing values and creating a column with length of reign 
+```{r}
+monarchs <- read_csv2("data/danish_monarchs_tidy_spreadsheet.csv", na="Na")
+monarchs_no_na <- na.omit(monarchs)
+monarchs_no_na$length_reign <- monarchs_no_na$end_reign-monarchs_no_na$start_reign
+
+```
+
+## Plotting length of reign pr. monarch
+```{r}
+monarchs_plot <- monarchs_no_na %>%
+ggplot(aes(x=monarch_name, y=length_reign))
+monarchs_plot +
+  geom_col()
+```
+Unfortunatly the names are hardly visible 
+
+## Plotting lenght of reign over time
+```{r}
+monarchs_time_plot <- monarchs_no_na %>%
+  ggplot(aes(x=start_reign, y=length_reign))
+monarchs_time_plot + 
+  labs(title = "Length of reign over time", x = "Start of reign", y = "Length of reign") +
+  geom_point() + 
+  geom_line() +
+  geom_smooth()
+
+
+```
+
